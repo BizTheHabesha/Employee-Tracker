@@ -1,0 +1,19 @@
+{
+  "name": "employee-tracker",
+  "version": "1.0.0",
+  "description": "An employee tracker built on an SQL server",
+  "main": "index.js",
+  "directories": {
+    "lib": "lib",
+    "test": "test"
+  },
+  "scripts": {
+    "test": "npm run test"
+  },
+  "author": "BizTheHabesha",
+  "license": "MIT",
+  "dependencies": {
+    "inquirer": "^8.2.4",
+    "mysql2": "^3.2.4"
+  }
+}
