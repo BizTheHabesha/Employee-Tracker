@@ -107,52 +107,36 @@ function renderTables(arr,_padding = 2, _hsep = '-', _hhsep = '=', _vsep = '|', 
     });
     return 1;
 }
-function viewAllDepartments(hcb){
+async function viewAllDepartments(hcb){
+    const r = await db.promise().query(`SELECT * FROM department`);
+    renderTables(r[0]);
+    home(hcb);
+}
+async function viewAllRoles(hcb){
     let formatted = [];
-    db.query(`SELECT * FROM department`, (e,r)=>{
-        if(e)console.error(`viewAllDepartment() encountered an error: ${e}`);
-        else{
-            renderTables(r);
+    const r = await db.promise().query(`SELECT * FROM role`)
+    r[0].forEach(async role => {
+        const r1 = await db.promise().query(`SELECT name FROM department WHERE id="${role['department_id']}"`)
+        role['department'] = r1[0][0]['name'];
+        delete role['department_id'];
+        formatted.push(role);
+        if(formatted.length === r[0].length){
+            // memory leaks out the wazoo
+            renderTables(formatted)
             home(hcb);
         }
-    })
-}
-function viewAllRoles(hcb){
-    let formatted = [];
-    db.query(`SELECT * FROM role`, (e,r) => {
-        if(e)console.error(`viewAllRoles() encountered an error: ${e}`)
-        else{
-            r.forEach(role => {
-                db.query(`SELECT name FROM department WHERE id="${role['department_id']}"`, (e1, r1)=>{
-                    if(e1) console.error(`viewAllRoles() encountered an error: ${e1}`)
-                    else{
-                        role['department'] = r1[0]['name'];
-                        delete role['department_id'];
-                        formatted.push(role);
-                        if(formatted.length === r.length){
-                            // memory leaks out the wazoo
-                            renderTables(formatted)
-                            home(hcb);
-                            
-                        }
-                    }
-                })
-            })
-        }
-    })
+    });
 }
 async function viewAllEmployees(hcb){
     let formatted = [];
     let ret1 = await db.promise().query(`SELECT * FROM employee`);
-    ret1[0].forEach(async (employee) => {
+    await ret1[0].forEach(async employee => {
         let roleres = await db.promise().query(`SELECT title, department_id, salary FROM role WHERE id="${employee['role_id']}"`);
         employee['title'] = roleres[0][0]['title'];
         employee['salary'] = roleres[0][0]['salary'];
 
-        
         let depres = await db.promise().query(`SELECT name FROM department WHERE id="${roleres[0][0]['department_id']}"`);
         employee['department'] = depres[0][0]['name'];
-
 
         let manres = await db.promise().query(`SELECT first_name,last_name FROM employee WHERE id="${employee['manager_id']}"`);
         employee['manager'] = manres[0][0] ? (`${manres[0][0]['first_name']} ${manres[0][0]['last_name']}`) : null;
@@ -160,9 +144,13 @@ async function viewAllEmployees(hcb){
         delete employee['role_id'];
         delete employee['manager_id'];
         formatted.push(employee);
+        completed = true;
         if(formatted.length === ret1[0].length){
+            console.info(`Finished formatting ${formatted.length} entries. Displaying...`);
             renderTables(formatted);
             home(hcb);
+        }else{
+            console.info(`Formatted up to ${formatted.length}, continuing...`);
         }
     })
 }
@@ -183,7 +171,6 @@ async function addDepartment(hcb){
         else process.exit(1);
     })
 }
-
 async function addRole(hcb){
     await updatePrim();
     const depChoices = [];
@@ -507,6 +494,8 @@ function seed(hcb){
         ('Harold', 'Jones', 3, 1),
         ('Sally', 'Smith', 3, 1);
     `,cb);
+    console.clear();
+    console.info(`Seeded!`);
     home(hcb);
 }
 async function main(){
