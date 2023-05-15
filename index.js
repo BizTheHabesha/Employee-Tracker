@@ -1,5 +1,4 @@
 const inquirer = require('inquirer');
-const {Department, Role, Employee} = require('./lib/sql-helpers')
 const mysql = require('mysql2');
 const db = mysql.createConnection({
         host: 'localhost',
@@ -9,9 +8,24 @@ const db = mysql.createConnection({
     },
     console.log(`Connected to the business_db database.`)
 );
+var dbprim = [];
+async function updatePrim(){
+    const deps = await db.promise().query(`SELECT name, id FROM department`);
+    const roles = await db.promise().query(`SELECT title, id, department_id FROM role`);
+    dbprim = deps[0];
+    dbprim.forEach(dep => {
+        dep['roles'] = [];
+        roles[0].forEach(role => {
+            if(role['department_id'] === dep['id']){
+                dep['roles'].push(role);
+            }
+        })
+    })
+    return dbprim;
+}
 /** 
  * @deprecated 
- * Uses console.log() to render an array of objects in a simpler table format than console.table(). Also ignores stdstream and indeces.
+ * @description Uses console.log() to render an array of objects in a simpler table format than console.table(). Also ignores stdstream and indeces.
  * This function is rudementary and not optimized for streams (or at all). You are better off using another package or using node's 
  * standard console.table() method and has been phased out of the employee tracker all together. The decleration is still here because I
  * spent too long on this.
@@ -23,6 +37,7 @@ const db = mysql.createConnection({
  * @param {String} _ws A string to fill the whitespace in the table instead of space (' ') (optional)
  */
 function renderTables(arr,_padding = 2, _hsep = '-', _hhsep = '=', _vsep = '|', _ws = ' '){
+    console.clear();
     // a local function which will return a string of repeated characters. The length of the string and the characters in question are passed in.
     let charLen = (char, len)=>{
         // all contexts of this function will require the padding.
@@ -36,7 +51,7 @@ function renderTables(arr,_padding = 2, _hsep = '-', _hhsep = '=', _vsep = '|', 
         return ret;
     }
     // ensure the array passed is an array
-    if(!Array.isArray(arr)) throw new Error(`renderTables expected paramter 'arr' to be an array, recieved ${arr}`);
+    if(!Array.isArray(arr)) throw new Error(`renderTables expected paramter 'arr' to be an array, recieved ${typeof arr}`);
     // holds longest length entries for each key
     let buffers = {};
     // initialize the buffers object with the keys and a starting value of 0.
@@ -90,64 +105,211 @@ function renderTables(arr,_padding = 2, _hsep = '-', _hhsep = '=', _vsep = '|', 
         // log out this row.
         console.log(line);
     });
+    return 1;
 }
-function viewAllDepartments(){
-    home();
-}
-function viewAllRoles(){
-
-}
-function viewAllEmployees(){
+function viewAllDepartments(hcb){
     let formatted = [];
-    db.query(`SELECT * FROM employee`, (e,r) => {
-        if(e)console.error(`viewAllEmployees() encountered an error: ${e}`);
+    db.query(`SELECT * FROM department`, (e,r)=>{
+        if(e)console.error(`viewAllDepartment() encountered an error: ${e}`);
         else{
-            r.forEach(employee => {
-                console.log(employee);
-                db.query(`SELECT title FROM ROLE WHERE id="${employee['role_id']}"`,(err,res)=>{
-                    if(err) console.log(err);
-                    db.query(`SELECT first_name FROM EMPLOYEE WHERE id="${employee['manager_id']}"`, (err1, res1)=>{
-                        if(err1) console.error(err1);
-                        else{
-                            employee['title'] = res[0]['title'];
-                            console.log(res1);
-                            employee['manager'] = res1[0] ? res1[0]['first_name'] : null;
-                            delete employee['role_id'];
-                            delete employee['manager_id'];
-                            formatted.push(employee);
-                            if(formatted.length === r.length){
-                                renderTables(formatted);
-                                home();
-                            }
+            renderTables(r);
+            home(hcb);
+        }
+    })
+}
+function viewAllRoles(hcb){
+    let formatted = [];
+    db.query(`SELECT * FROM role`, (e,r) => {
+        if(e)console.error(`viewAllRoles() encountered an error: ${e}`)
+        else{
+            r.forEach(role => {
+                db.query(`SELECT name FROM department WHERE id="${role['department_id']}"`, (e1, r1)=>{
+                    if(e1) console.error(`viewAllRoles() encountered an error: ${e1}`)
+                    else{
+                        role['department'] = r1[0]['name'];
+                        delete role['department_id'];
+                        formatted.push(role);
+                        if(formatted.length === r.length){
+                            // memory leaks out the wazoo
+                            renderTables(formatted)
+                            home(hcb);
+                            
                         }
-                    })
+                    }
                 })
             })
         }
     })
 }
-function addDepartment(){
-    home();
+async function viewAllEmployees(hcb){
+    let formatted = [];
+    let ret1 = await db.promise().query(`SELECT * FROM employee`);
+    ret1[0].forEach(async (employee) => {
+        let roleres = await db.promise().query(`SELECT title, department_id, salary FROM role WHERE id="${employee['role_id']}"`);
+        employee['title'] = roleres[0][0]['title'];
+        employee['salary'] = roleres[0][0]['salary'];
+
+        
+        let depres = await db.promise().query(`SELECT name FROM department WHERE id="${roleres[0][0]['department_id']}"`);
+        employee['department'] = depres[0][0]['name'];
+
+
+        let manres = await db.promise().query(`SELECT first_name,last_name FROM employee WHERE id="${employee['manager_id']}"`);
+        employee['manager'] = manres[0][0] ? (`${manres[0][0]['first_name']} ${manres[0][0]['last_name']}`) : null;
+
+        delete employee['role_id'];
+        delete employee['manager_id'];
+        formatted.push(employee);
+        if(formatted.length === ret1[0].length){
+            renderTables(formatted);
+            home(hcb);
+        }
+    })
 }
-function addRole(){
-    home();
+async function addDepartment(hcb){
+    await updatePrim();
+    inquirer.prompt([
+        {message:"This department's name (30 characters):", name:'name', type:'input', validate: function(inp, hash){
+            if(inp.length <= 30) return true;
+            else return 'Department name must be 30 characters or less';
+        }}
+    ]).then(async res => {
+        return await db.promise().query(`INSERT INTO department (name) VALUES ("${res['name']}")`);
+    }).then(res => {
+        if(res){
+            rejoin();
+            home(hcb);
+        }
+        else process.exit(1);
+    })
 }
-function addEmployee(){
-    home();
+
+async function addRole(hcb){
+    await updatePrim();
+    const depChoices = [];
+    let depid;
+    dbprim.forEach(dep => {
+        depChoices.push(dep['name'])
+    });
+    const getDepID = function(name){
+        console.log(`getDepID() recieved param "name" as ${name}`)
+        dbprim.forEach(dep => {
+            if(dep['name'] == name){
+                console.log(`returning ${dep['id']}`)
+                depid = dep['id'];
+            }
+        })
+    }
+    inquirer.prompt([
+        {message:"This role's title:", name:'title', type:'input', validate: function(inp, hash){
+            if(inp.length <= 30) return true;
+            else return 'Role title must be 30 characters or less';
+        }},
+        {message:"This role's salary (number):", name:'salary', type:'input',validate: function(inp, hash){
+            if(typeof parseInt(inp) === 'number') return true;
+            else return 'Salaray must be a number';
+        }},
+        {message:"This role's department:", name:"department_name", type:'list', choices: depChoices}
+    ]).then(async res => {
+        let department_id = getDepID(res['department_name'])
+        return await db.promise().query(`INSERT INTO role (title, salary, department_id)
+        VALUES ('${res['title']}', ${res['salary']}, ${depid})`)
+    }).then(async res => {
+        if(res){
+            rejoin();
+            home(hcb);
+        }
+        else process.exit(1);
+    })
 }
-function updateRole(){
-    home();
+async function addEmployee(hcb){
+    await updatePrim();
+    let depChoices = [];
+    let roleChoices = [];
+    let roleByDep = {};
+    dbprim.forEach(dep => {
+        if(!dep['roles'].length) return;
+        depChoices.push(dep['name']);
+        roleByDep[`${dep['name']}`] = [];
+        dep['roles'].forEach(role => {
+            roleByDep[`${dep['name']}`].push(role['title']);
+        })
+    })
+
+    inquirer.prompt([
+        {message:"This employee's department (only departments with defined roles can be selected):",name:"department",type:'list', choices:depChoices},
+    ]).then(res => {
+        roleChoices = roleByDep[res['department']];
+        inquirer.prompt([
+            {message:"This employee's role:", name:'role', type:'list',choices:roleChoices},
+            {message:"This employee's first name:",name:'first_name', type:'input', validate: function(inp, hash){
+                if(inp.length <= 30) return true;
+                else return 'Employee first name cannot exceed 30 characters';
+            }},
+            {message:"This employee's last name:",name:'last_name',type:'input',validate:function(inp, hash){
+                if(inp.length <= 30) return true;
+                else return 'Employee last name cannot exceed 30 characters';
+            }},
+            {message:"Assign this employee a manager? (The manager must already be an employee)",name:"add_manager", type:'confirm'},
+            {message:"Assign this manager by id or find them with first and last name?", name:'find_manager_by', type:'list',choices:[
+                {value: true, name:'Assign by id'},
+                {value: false, name:'Find by name'}
+            ]},
+            {message:"Manager's ID:",name:"manager_id", type:'input', validate: function(inp, hash){
+                if(typeof parseInt(inp) === 'number') return true;
+                else return 'Manager\'s ID must be a number';
+            },when: function(hash){
+                return !!hash['add_manager'];
+            }},
+            {message:"(Find Manager) Manager's first name:",name:'manager_first_name',type:'input', validate: function(inp, hash){
+                if(inp.length <= 30) return true;
+                else return "Employee's names are no longer than 30 characters. (Maybe this manager was inputted under an alias?)";
+            },when: function(hash){
+                return !!hash['add_manager'] && !hash['find_manager_by'];
+            }},
+            {message:"(Find Manager) Manager's last name:",name:'manager_last_name',type:'input', validate: function(inp, hash){
+                if(inp.length <= 30) return true;
+                else return "Employee's names are no longer than 30 characters. (Maybe this manager was inputted under an alias?)";
+            },when: function(hash){
+                return !!hash['add_manager'] && !hash['find_manager_by'];
+            }}
+        ]).then(async res=>{
+            let managerID = 'NULL';
+            const roleIDQ = await db.promise().query(`SELECT id FROM role WHERE title='unassigned'`);
+            let roleID = roleIDQ[0][0]['id'];
+            if(!!res['add_manager']){
+                if(!!res['find_manager_by']) managerID = res['manager_id'];
+                else{
+                    managerID = await db.promise().query(`SELECT id FROM employee 
+                    WHERE first_name="${res['manager_first_name']}" AND last_name="${res['manager_last_name']}"`);
+                }
+            }
+            const selRole = await db.promise().query(`SELECT id FROM role WHERE title='${res['role']}'`);
+            if(selRole[0][0]['id']) roleID = selRole[0][0]['id']
+            await db.promise().query(`INSERT INTO employee (first_name, last_name, role_id, manager_id)
+            VALUES ("", "", ${role[id]}, ${managerID})`)
+            console.log(dbprim);
+            home(hcb);
+        })
+    })
 }
-function exit(){
+function updateRole(hcb){
+    home(hcb);
+}
+function exit(hcb){
     inquirer.prompt([
         {message:'All changes have been saved. Are you sure you want to exit?', name:'option', type:'confirm'}
     ])
     .then(selection => {
-        if(!selection['option']) home();
-        else process.exit();
+        if(!selection['option']) home(hcb);
+        else{
+            console.clear();
+            console.info('Goodbye!');
+            process.exit();
+        }
     })
 }
-function home(){
+function home(_start = 1){
     inquirer.prompt([
         {message: 'Please select one of the following options', name:'option', type:'list', choices:[
             new inquirer.Separator(`----VIEW----`),
@@ -164,38 +326,38 @@ function home(){
             new inquirer.Separator(`----EXIT----`),
             {value: 9, name:'Exit'},
             {value: 0, name:'Force Exit'}
-        ], default: 'Add a department', loop: false}
+        ], default: (_start-1), loop: false}
     ])
     .then(selection => {
         let r = selection['option'];
         if(!r) process.exit();
         switch (r) {
             case 9:
-                exit();
+                exit(9);
                 break;
             case 1:
-                viewAllDepartments();
+                viewAllDepartments(1);
                 break;
             case 2:
-                viewAllRoles();
+                viewAllRoles(2);
                 break;
             case 3:
-                viewAllEmployees();
+                viewAllEmployees(3);
                 break;
             case 4:
-                addDepartment();
+                addDepartment(4);
                 break;
             case 5:
-                addRole();
+                addRole(5);
                 break;
             case 6:
-                addEmployee();
+                addEmployee(6);
                 break;
             case 7:
-                seed();
+                seed(7);
                 break;
             case 8:
-                updateRole();
+                updateRole(8);
                 break;
         }
     })
@@ -244,7 +406,20 @@ function initTables(){
         FOREIGN KEY (manager_id) REFERENCES employee(id) ON DELETE SET NULL
     );`, cb);
 }
-function seed(){
+async function unassigneds(){
+    const createdDepQ = await db.promise().query(`SELECT * FROM department WHERE name='unassigned'`);
+    if(!createdDepQ[0].length){
+        await db.promise().query(`INSERT INTO department (name) VALUES ('unassigned')`);
+    }
+    const unassignedDepID = await db.promise().query(`SELECT id FROM department WHERE name='unassigned'`);
+    console.log(unassignedDepID);
+    const createdRoleQ = await db.promise().query(`SELECT * FROM role WHERE title='unassigned'`);
+    if(!createdRoleQ[0].length){
+        await db.promise().query(`INSERT INTO role (title, salary, department_id)
+        VALUES ('unassigned', 0, ${unassignedDepID[0][0]['id']})`);
+    }
+}
+function seed(hcb){
     const cb = (e, r) => {
         if(e) console.error(`seed() encountered an error: ${e}`);
     }
@@ -255,31 +430,34 @@ function seed(){
         ('Legal');
     `,cb);
     db.query(`INSERT INTO role (title, salary, department_id)
-    VALUES ('Sales Lead', 100000, 1),
-        ('Salesperson', 80000, 1),
-        ('Senior Software Engineer', 182000, 2),
-        ('Junior Software Engineer', 122000, 2),
-        ('Accountant Supervisor', 150000, 3),
-        ('Accountant', 125000, 3),
-        ('Legal Team Lead', 250000, 4),
-        ('Lawyer', 190000, 4);
+    VALUES ('Sales Lead', 100000, 2),
+        ('Salesperson', 80000, 2),
+        ('Senior Software Engineer', 182000, 3),
+        ('Junior Software Engineer', 122000, 3),
+        ('Accountant Supervisor', 150000, 4),
+        ('Accountant', 125000, 4),
+        ('Legal Team Lead', 250000, 5),
+        ('Lawyer', 190000, 5);
     `,cb);
     db.query(`INSERT INTO employee (first_name, last_name, role_id, manager_id)
-    VALUES ('John', 'Doe', 1, NULL),
-        ('Mike', 'Chan', 2, 1),
-        ('Ashley', 'Rodriguez', 3, NULL),
+    VALUES ('John', 'Doe', 2, NULL),
+        ('Mike', 'Chan', 3, 1),
+        ('Ashley', 'Rodriguez', 4, NULL),
         ('Kevin', 'Tupik', 4, 3),
-        ('Malia', 'Brown', 5, NULL),
-        ('Sarah', 'Lourd', 6, 5),
-        ('Tom', 'Allen', 7, NULL),
-        ('Sam', 'Clemens', 8, 7),
-        ('Harold', 'Jones', 2, 1),
-        ('Sally', 'Smith', 2, 1);
+        ('Malia', 'Brown', 6, NULL),
+        ('Sarah', 'Lourd', 7, 5),
+        ('Tom', 'Allen', 8, NULL),
+        ('Sam', 'Clemens', 9, 7),
+        ('Harold', 'Jones', 3, 1),
+        ('Sally', 'Smith', 3, 1);
     `,cb);
+    home(hcb);
 }
-function main(){
+async function main(){
     initTables();
+    await unassigneds()
     rejoin();
+    console.clear();
     home();
 }
 main();
