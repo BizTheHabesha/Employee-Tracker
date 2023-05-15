@@ -238,8 +238,8 @@ async function addEmployee(hcb){
 
     inquirer.prompt([
         {message:"This employee's department (only departments with defined roles can be selected):",name:"department",type:'list', choices:depChoices},
-    ]).then(res => {
-        roleChoices = roleByDep[res['department']];
+    ]).then(res0 => {
+        roleChoices = roleByDep[res0['department']];
         inquirer.prompt([
             {message:"This employee's role:", name:'role', type:'list',choices:roleChoices},
             {message:"This employee's first name:",name:'first_name', type:'input', validate: function(inp, hash){
@@ -254,12 +254,14 @@ async function addEmployee(hcb){
             {message:"Assign this manager by id or find them with first and last name?", name:'find_manager_by', type:'list',choices:[
                 {value: true, name:'Assign by id'},
                 {value: false, name:'Find by name'}
-            ]},
+            ],when: function(hash){
+                return !!hash['add_manager']
+            }},
             {message:"Manager's ID:",name:"manager_id", type:'input', validate: function(inp, hash){
                 if(typeof parseInt(inp) === 'number') return true;
                 else return 'Manager\'s ID must be a number';
             },when: function(hash){
-                return !!hash['add_manager'];
+                return !!hash['add_manager'] && !!hash['find_manager_by'];
             }},
             {message:"(Find Manager) Manager's first name:",name:'manager_first_name',type:'input', validate: function(inp, hash){
                 if(inp.length <= 30) return true;
@@ -287,14 +289,68 @@ async function addEmployee(hcb){
             const selRole = await db.promise().query(`SELECT id FROM role WHERE title='${res['role']}'`);
             if(selRole[0][0]['id']) roleID = selRole[0][0]['id']
             await db.promise().query(`INSERT INTO employee (first_name, last_name, role_id, manager_id)
-            VALUES ("", "", ${role[id]}, ${managerID})`)
-            console.log(dbprim);
+            VALUES ("${res['first_name']}", "${res['last_name']}", ${roleID}, ${managerID})`)
             home(hcb);
         })
     })
 }
-function updateRole(hcb){
-    home(hcb);
+async function updateRole(hcb){
+    await updatePrim();
+    let depChoices = [];
+    let roleChoices = [];
+    let roleByDep = {};
+    dbprim.forEach(dep => {
+        if(!dep['roles'].length) return;
+        depChoices.push(dep['name']);
+        roleByDep[`${dep['name']}`] = [];
+        dep['roles'].forEach(role => {
+            roleByDep[`${dep['name']}`].push(role['title']);
+        })
+    })
+    await viewAllEmployees();
+    inquirer.prompt([
+        {message:'Search for employee by ID or by first and last name?', name:'option', type:'list',choices:[
+            {value: true, name:'Search by ID'},
+            {value: false, name:'Search by name'}
+        ]},
+        {message:'Employee ID:', name:'employee_id', type:'input', validate: function(inp, hash){
+            if(typeof parseInt(inp) === 'number') return true;
+            else return 'Employee\'s ID must be a number';
+        },when:function(hash){
+            return !!hash['option'];
+        }},
+        {message:'Employee First Name:', name:'first_name', type:'input', validate: function(inp, hash){
+            if(inp.length <= 30) return true;
+            else return "Employee's names are no longer than 30 characters. (Maybe this employee was inputted under an alias?)";
+        },when:function(hash){
+            return !hash['option'];
+        }},
+        {message:'Employee Last Name:', name:'last_name', type:'input', validate: function(inp, hash){
+            if(inp.length <= 30) return true;
+            else return "Employee's names are no longer than 30 characters. (Maybe this employee was inputted under an alias?)";
+        },when:function(hash){
+            return !hash['option'];
+        }},
+        {message:'Select a department to switch user to', name:'department', type:'list', choices: depChoices}
+    ]).then(async res => {
+        roleChoices = roleByDep[res['department']];
+        inquirer.prompt([
+            {message:'Select a role to switch user to', name:'role', type:'list', choices:roleChoices}
+        ]).then(async resRole => {
+            const roleIDQ = await db.promise().query(`SELECT id FROM role WHERE title='unassigned'`);
+            let roleID = roleIDQ[0][0]['id'];
+            const selRole = await db.promise().query(`SELECT id FROM role WHERE title='${resRole['role']}'`);
+            if(selRole[0][0]['id']) roleID = selRole[0][0]['id']
+            let employeeID;
+            if(!!res['option']) employeeID = res['employee_id'];
+            else{
+                employeeID = await db.promise().query(`SELECT id FROM employee 
+                WHERE first_name="${res['first_name']}" AND last_name="${res['last_name']}"`);
+            }
+            await db.promise().query(`UPDATE employee SET role_id=${roleID} WHERE id=${employeeID}`);
+            home();
+        })
+    })
 }
 function exit(hcb){
     inquirer.prompt([
