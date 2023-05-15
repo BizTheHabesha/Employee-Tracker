@@ -1,5 +1,4 @@
 const inquirer = require('inquirer');
-const {Department, Role, Employee} = require('./lib/sql-helpers')
 const mysql = require('mysql2');
 const db = mysql.createConnection({
         host: 'localhost',
@@ -9,9 +8,24 @@ const db = mysql.createConnection({
     },
     console.log(`Connected to the business_db database.`)
 );
+var dbprim = [];
+async function updatePrim(){
+    const deps = await db.promise().query(`SELECT name, id FROM department`);
+    const roles = await db.promise().query(`SELECT title, id, department_id FROM role`);
+    dbprim = deps[0];
+    dbprim.forEach(dep => {
+        dep['roles'] = [];
+        roles[0].forEach(role => {
+            if(role['department_id'] === dep['id']){
+                dep['roles'].push(role);
+            }
+        })
+    })
+    return dbprim;
+}
 /** 
  * @deprecated 
- * Uses console.log() to render an array of objects in a simpler table format than console.table(). Also ignores stdstream and indeces.
+ * @description Uses console.log() to render an array of objects in a simpler table format than console.table(). Also ignores stdstream and indeces.
  * This function is rudementary and not optimized for streams (or at all). You are better off using another package or using node's 
  * standard console.table() method and has been phased out of the employee tracker all together. The decleration is still here because I
  * spent too long on this.
@@ -23,6 +37,7 @@ const db = mysql.createConnection({
  * @param {String} _ws A string to fill the whitespace in the table instead of space (' ') (optional)
  */
 function renderTables(arr,_padding = 2, _hsep = '-', _hhsep = '=', _vsep = '|', _ws = ' '){
+    console.clear();
     // a local function which will return a string of repeated characters. The length of the string and the characters in question are passed in.
     let charLen = (char, len)=>{
         // all contexts of this function will require the padding.
@@ -36,7 +51,7 @@ function renderTables(arr,_padding = 2, _hsep = '-', _hhsep = '=', _vsep = '|', 
         return ret;
     }
     // ensure the array passed is an array
-    if(!Array.isArray(arr)) throw new Error(`renderTables expected paramter 'arr' to be an array, recieved ${arr}`);
+    if(!Array.isArray(arr)) throw new Error(`renderTables expected paramter 'arr' to be an array, recieved ${typeof arr}`);
     // holds longest length entries for each key
     let buffers = {};
     // initialize the buffers object with the keys and a starting value of 0.
@@ -90,34 +105,62 @@ function renderTables(arr,_padding = 2, _hsep = '-', _hhsep = '=', _vsep = '|', 
         // log out this row.
         console.log(line);
     });
+    return 1;
 }
-function viewAllDepartments(){
-    home();
+function viewAllDepartments(hcb){
+    let formatted = [];
+    db.query(`SELECT * FROM department`, (e,r)=>{
+        if(e)console.error(`viewAllDepartment() encountered an error: ${e}`);
+        else{
+            renderTables(r);
+            home(hcb);
+        }
+    })
 }
-function viewAllRoles(){
-
+function viewAllRoles(hcb){
+    let formatted = [];
+    db.query(`SELECT * FROM role`, (e,r) => {
+        if(e)console.error(`viewAllRoles() encountered an error: ${e}`)
+        else{
+            r.forEach(role => {
+                db.query(`SELECT name FROM department WHERE id="${role['department_id']}"`, (e1, r1)=>{
+                    if(e1) console.error(`viewAllRoles() encountered an error: ${e1}`)
+                    else{
+                        role['department'] = r1[0]['name'];
+                        delete role['department_id'];
+                        formatted.push(role);
+                        if(formatted.length === r.length){
+                            // memory leaks out the wazoo
+                            renderTables(formatted)
+                            home(hcb);
+                            
+                        }
+                    }
+                })
+            })
+        }
+    })
 }
-function viewAllEmployees(){
+function viewAllEmployees(hcb){
     let formatted = [];
     db.query(`SELECT * FROM employee`, (e,r) => {
         if(e)console.error(`viewAllEmployees() encountered an error: ${e}`);
         else{
             r.forEach(employee => {
-                console.log(employee);
                 db.query(`SELECT title FROM ROLE WHERE id="${employee['role_id']}"`,(err,res)=>{
                     if(err) console.log(err);
-                    db.query(`SELECT first_name FROM EMPLOYEE WHERE id="${employee['manager_id']}"`, (err1, res1)=>{
+                    db.query(`SELECT first_name,last_name FROM employee WHERE id="${employee['manager_id']}"`, (err1, res1)=>{
                         if(err1) console.error(err1);
                         else{
                             employee['title'] = res[0]['title'];
-                            console.log(res1);
-                            employee['manager'] = res1[0] ? res1[0]['first_name'] : null;
+                            employee['manager'] = res1[0] ? (`${res1[0]['first_name']} ${res1[0]['last_name']}`) : null;
                             delete employee['role_id'];
                             delete employee['manager_id'];
                             formatted.push(employee);
                             if(formatted.length === r.length){
+                                // forbidden memory leaks do not stop
                                 renderTables(formatted);
-                                home();
+                                home(hcb);
                             }
                         }
                     })
@@ -126,28 +169,68 @@ function viewAllEmployees(){
         }
     })
 }
-function addDepartment(){
-    home();
+function addDepartment(hcb){
+    home(hcb);
 }
-function addRole(){
-    home();
+s
+async function addRole(hcb){
+    await updatePrim();
+    const depChoices = [];
+    dbprim.forEach(dep => {
+        depChoices.push(dep['name'])
+    });
+    const getDepID = function(name){
+        console.log(`getDepID() recieved param "name" as ${name}`)
+        dbprim.forEach(dep => {
+            console.log(`Checking department:`)
+            console.log(dep);
+            console.log(`Checking ${dep['name']} against ${name}`);
+            if(dep['name'] == name){
+                console.log(`returning ${dep['id']}`)
+                return dep['id'];
+            }
+        })
+        // throw new Error(`addRole().getDepID() could not find selected department ${name}`);
+    }
+    inquirer.prompt([
+        {message:"This role's title:", name:'title', type:'input'},
+        {message:"This role's salary (number):", name:'salary', type:'input',validate: function(inp, hash){
+            if(typeof parseInt(inp) === 'number') return true;
+            else return 'Salaray must be a number';
+        }},
+        {message:"This role's department:", name:"department_name", type:'list', choices: depChoices}
+    ]).then(async res => {
+        let department_id = getDepID(res['department_name'])
+        return await db.promise().query(`INSERT INTO role (title, salary, department_id)
+        VALUES ('${res['title']}', ${res['salary']}, ${department_id})`)
+    }).then(res => {
+        if(res){
+            console.log(res);
+            home(hcb);
+        }
+        else process.exit(1);
+    })
 }
-function addEmployee(){
-    home();
+function addEmployee(hcb){
+    home(hcb);
 }
 function updateRole(){
-    home();
+    home(hcb);
 }
-function exit(){
+function exit(hcb){
     inquirer.prompt([
         {message:'All changes have been saved. Are you sure you want to exit?', name:'option', type:'confirm'}
     ])
     .then(selection => {
-        if(!selection['option']) home();
-        else process.exit();
+        if(!selection['option']) home(hcb);
+        else{
+            console.clear();
+            console.info('Goodbye!');
+            process.exit();
+        }
     })
 }
-function home(){
+function home(_start = 1){
     inquirer.prompt([
         {message: 'Please select one of the following options', name:'option', type:'list', choices:[
             new inquirer.Separator(`----VIEW----`),
@@ -164,38 +247,38 @@ function home(){
             new inquirer.Separator(`----EXIT----`),
             {value: 9, name:'Exit'},
             {value: 0, name:'Force Exit'}
-        ], default: 'Add a department', loop: false}
+        ], default: (_start-1), loop: false}
     ])
     .then(selection => {
         let r = selection['option'];
         if(!r) process.exit();
         switch (r) {
             case 9:
-                exit();
+                exit(9);
                 break;
             case 1:
-                viewAllDepartments();
+                viewAllDepartments(1);
                 break;
             case 2:
-                viewAllRoles();
+                viewAllRoles(2);
                 break;
             case 3:
-                viewAllEmployees();
+                viewAllEmployees(3);
                 break;
             case 4:
-                addDepartment();
+                addDepartment(4);
                 break;
             case 5:
-                addRole();
+                addRole(5);
                 break;
             case 6:
-                addEmployee();
+                addEmployee(6);
                 break;
             case 7:
-                seed();
+                seed(7);
                 break;
             case 8:
-                updateRole();
+                updateRole(8);
                 break;
         }
     })
@@ -280,6 +363,7 @@ function seed(){
 function main(){
     initTables();
     rejoin();
+    console.clear();
     home();
 }
 main();
