@@ -13,6 +13,7 @@
   "author": "BizTheHabesha",
   "license": "MIT",
   "dependencies": {
+    "clui": "^0.3.6",
     "inquirer": "^8.2.4",
     "mysql2": "^3.2.4"
   },
