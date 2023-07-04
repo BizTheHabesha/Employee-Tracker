@@ -18,6 +18,7 @@ npm i
 This will install all dependencies.
 ___
 ## Usage
+You can view the walkthrough [here](https://youtu.be/uMoT0xrR_WI).  
 After installing the dependencies, run the following command from the root directory:  
 ```bash  
 node index.js  
