@@ -393,12 +393,12 @@ async function addEmployee(hcb) {
 					},
 					{
 						message:
-							"Assign this manager by id or find them with first and last name?",
+							"Assign this manager by id or find them with first and last name? (by name is not implmented yet)",
 						name: "find_manager_by",
 						type: "list",
 						choices: [
 							{ value: true, name: "Assign by id" },
-							{ value: false, name: "Find by name" },
+							// { value: false, name: "Find by name" },
 						],
 						when: function (hash) {
 							return !!hash["add_manager"];
@@ -497,12 +497,13 @@ async function updateRole(hcb) {
 	inquirer
 		.prompt([
 			{
-				message: "Search for employee by ID or by first and last name?",
+				message:
+					"Search for employee by ID or by first and last name? (by name is not implmented yet)",
 				name: "option",
 				type: "list",
 				choices: [
 					{ value: true, name: "Search by ID" },
-					{ value: false, name: "Search by name" },
+					// { value: false, name: "Search by name" },
 				],
 			},
 			{
